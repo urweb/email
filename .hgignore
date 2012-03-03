@@ -1,0 +1,21 @@
+syntax: glob
+
+*~
+
+*.o
+.deps
+.libs
+*.lo
+*.la
+*.exe
+
+*.cache
+*.log
+*.status
+
+syntax: regexp
+
+^Makefile$
+^libtool$
+^config.h$
+^stamp-h1$

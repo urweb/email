@@ -1,0 +1,4 @@
+ffi mail
+include mail.h
+link -lurweb_mail
+effectful Mail.send
