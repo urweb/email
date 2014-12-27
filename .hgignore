@@ -19,3 +19,5 @@ syntax: regexp
 ^libtool$
 ^config.h$
 ^stamp-h1$
+^compile$
+^ar-lib$

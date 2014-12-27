@@ -1,4 +1,8 @@
 AC_INIT([email], [1.0])
+
+# automake 1.12 requires this, but automake 1.11 doesn't recognize it
+m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
+
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_PROG_CC()
 AC_PROG_LIBTOOL()
