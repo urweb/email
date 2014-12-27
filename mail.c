@@ -200,7 +200,7 @@ static int sendAddrs(const char *kind, uw_context ctx, int sock, char *s, char *
   for (p = strchr(s, ','); p; p = strchr(p+1, ',')) {
     *p = 0;
 
-    snprintf(out, sizeof(out), "RCPT TO:%s\n", s);
+    snprintf(out, sizeof(out), "RCPT TO:%s\r\n", s);
     out[sizeof(out)-1] = 0;
     *p = ',';
 
@@ -218,7 +218,7 @@ static int sendAddrs(const char *kind, uw_context ctx, int sock, char *s, char *
   }
 
   if (*s) {
-    snprintf(out, sizeof(out), "RCPT TO:%s\n", s);
+    snprintf(out, sizeof(out), "RCPT TO:%s\r\n", s);
     out[sizeof(out)-1] = 0;
 
     if (really_string(sock, out) < 0) {
@@ -267,7 +267,7 @@ static void commit(void *data) {
     return;
   }
 
-  if (really_string(sock, "HELO localhost\n") < 0) {
+  if (really_string(sock, "HELO localhost\r\n") < 0) {
     close(sock);
     uw_set_error_message(j->ctx, "Error sending HELO");
     return;
@@ -279,7 +279,7 @@ static void commit(void *data) {
     return;
   }
 
-  snprintf(out, sizeof(out), "MAIL FROM:%s\n", j->h->from);
+  snprintf(out, sizeof(out), "MAIL FROM:%s\r\n", j->h->from);
   out[sizeof(out)-1] = 0;
 
   if (really_string(sock, out) < 0) {
@@ -298,7 +298,7 @@ static void commit(void *data) {
   if (sendAddrs("Cc", j->ctx, sock, j->h->cc, buf, &pos)) return;
   if (sendAddrs("Bcc", j->ctx, sock, j->h->bcc, buf, &pos)) return;
 
-  if (really_string(sock, "DATA\n") < 0) {
+  if (really_string(sock, "DATA\r\n") < 0) {
     close(sock);
     uw_set_error_message(j->ctx, "Error sending DATA");
     return;
@@ -458,7 +458,7 @@ static void commit(void *data) {
     return;
   }
 
-  if (really_string(sock, "QUIT\n") < 0) {
+  if (really_string(sock, "QUIT\r\n") < 0) {
     close(sock);
     uw_set_error_message(j->ctx, "Error sending QUIT");
     return;
