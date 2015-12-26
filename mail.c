@@ -93,7 +93,7 @@ uw_Mail_headers uw_Mail_cc(uw_context ctx, uw_Basis_string s, uw_Mail_headers h)
 
   address(ctx, s);
   if (h2->cc) {
-    uw_Basis_string all = uw_malloc(ctx, strlen(h2->cc) + 1 + strlen(s));
+    uw_Basis_string all = uw_malloc(ctx, strlen(h2->cc) + 2 + strlen(s));
     sprintf(all, "%s,%s", h2->cc, s);
     h2->cc = all;
   } else
@@ -111,7 +111,7 @@ uw_Mail_headers uw_Mail_bcc(uw_context ctx, uw_Basis_string s, uw_Mail_headers h
 
   address(ctx, s);
   if (h2->bcc) {
-    uw_Basis_string all = uw_malloc(ctx, strlen(h2->bcc) + 1 + strlen(s));
+    uw_Basis_string all = uw_malloc(ctx, strlen(h2->bcc) + 2 + strlen(s));
     sprintf(all, "%s,%s", h2->bcc, s);
     h2->bcc = all;
   } else
