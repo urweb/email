@@ -75,7 +75,7 @@ uw_Mail_headers uw_Mail_to(uw_context ctx, uw_Basis_string s, uw_Mail_headers h)
 
   address(ctx, s);
   if (h2->to) {
-    uw_Basis_string all = uw_malloc(ctx, strlen(h2->to) + 1 + strlen(s));
+    uw_Basis_string all = uw_malloc(ctx, strlen(h2->to) + 2 + strlen(s));
     sprintf(all, "%s,%s", h2->to, s);
     h2->to = all;
   } else
