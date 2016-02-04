@@ -378,7 +378,7 @@ static void commit(void *data) {
              "Content-Type: multipart/alternative; boundary=\"%s\"\r\n"
              "\r\n"
              "--%s\r\n"
-             "Content-Type: text/plain\r\n"
+             "Content-Type: text/plain; charset=utf-8\r\n"
              "\r\n",
              separator, separator);
     out[sizeof(out)-1] = 0;
@@ -397,7 +397,7 @@ static void commit(void *data) {
 
     snprintf(out, sizeof(out), "\r\n"
              "--%s\r\n"
-             "Content-Type: text/html\r\n"
+             "Content-Type: text/html; charset=utf-8\r\n"
              "\r\n",
              separator);
     out[sizeof(out)-1] = 0;
@@ -425,7 +425,7 @@ static void commit(void *data) {
       return;
     }
   } else {
-    if (really_string(sock, "Content-Type: text/plain\r\n\r\n") < 0) {
+    if (really_string(sock, "Content-Type: text/plain; charset=utf-8\r\n\r\n") < 0) {
       close(sock);
       uw_set_error_message(j->ctx, "Error sending text Content-Type");
       return;
