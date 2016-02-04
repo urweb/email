@@ -61,7 +61,7 @@ uw_Mail_headers uw_Mail_from(uw_context ctx, uw_Basis_string s, uw_Mail_headers 
  ok:
   */
   address(ctx, s);
-  h2->from = s;
+  h2->from = uw_strdup(ctx, s);
 
   return h2;
 }
@@ -79,7 +79,9 @@ uw_Mail_headers uw_Mail_to(uw_context ctx, uw_Basis_string s, uw_Mail_headers h)
     sprintf(all, "%s,%s", h2->to, s);
     h2->to = all;
   } else
-    h2->to = s;
+    h2->to = uw_strdup(ctx, s);
+
+  fprintf(stderr, "TO: %s\n", h2->to);
 
   return h2;
 }
@@ -97,7 +99,7 @@ uw_Mail_headers uw_Mail_cc(uw_context ctx, uw_Basis_string s, uw_Mail_headers h)
     sprintf(all, "%s,%s", h2->cc, s);
     h2->cc = all;
   } else
-    h2->cc = s;
+    h2->cc = uw_strdup(ctx, s);
 
   return h2;
 }
@@ -115,7 +117,7 @@ uw_Mail_headers uw_Mail_bcc(uw_context ctx, uw_Basis_string s, uw_Mail_headers h
     sprintf(all, "%s,%s", h2->bcc, s);
     h2->bcc = all;
   } else
-    h2->bcc = s;
+    h2->bcc = uw_strdup(ctx, s);
 
   return h2;
 }
@@ -132,7 +134,7 @@ uw_Mail_headers uw_Mail_subject(uw_context ctx, uw_Basis_string s, uw_Mail_heade
     uw_error(ctx, FATAL, "Duplicate Subject header");
 
   header(ctx, s);
-  h2->subject = s;
+  h2->subject = uw_strdup(ctx, s);
 
   return h2;
 }
