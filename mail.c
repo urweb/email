@@ -143,7 +143,7 @@ typedef struct {
   uw_Basis_string body, xbody;
 } job;
 
-#define BUFLEN 1024
+#define BUFLEN (1024*1024)
 
 static int smtp_read(uw_context ctx, int sock, char *buf, ssize_t *pos) {
   char *s;
@@ -187,6 +187,7 @@ static int smtp_read(uw_context ctx, int sock, char *buf, ssize_t *pos) {
 }
 
 static int really_string(int sock, const char *s) {
+  fprintf(stderr, "MAIL: %s\n", s);
   return uw_really_send(sock, s, strlen(s));
 }
 
@@ -350,17 +351,6 @@ static void commit(void *data) {
     if (really_string(sock, out) < 0) {
       close(sock);
       uw_set_error_message(j->ctx, "Error sending Cc");
-      return;
-    }
-  }
-
-  if (j->h->bcc) {
-    snprintf(out, sizeof(out), "Bcc: %s\r\n", j->h->bcc);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending Bcc");
       return;
     }
   }
