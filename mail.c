@@ -215,6 +215,8 @@ static int sendAddrs(const char *kind, uw_context ctx, int sock, char *s, char *
       uw_set_error_message(ctx, "Mail server doesn't respond to %s RCPT TO with code 250.", kind);
       return 1;
     }
+
+    s = p+1;
   }
 
   if (*s) {
