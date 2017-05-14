@@ -15,6 +15,39 @@ struct headers {
 
 typedef struct headers *uw_Mail_headers;
 
+static uw_Basis_string copy_string(uw_Basis_string s) {
+  if (s == NULL)
+    return NULL;
+  else
+    return strdup(s);
+}
+
+static void free_string(uw_Basis_string s) {
+  if (s == NULL)
+    return;
+  else
+    free(s);
+}
+
+static uw_Mail_headers copy_headers(uw_Mail_headers h) {
+  uw_Mail_headers h2 = malloc(sizeof(struct headers));
+  h2->from = copy_string(h->from);
+  h2->to = copy_string(h->to);
+  h2->cc = copy_string(h->cc);
+  h2->bcc = copy_string(h->bcc);
+  h2->subject = copy_string(h->subject);
+  return h2;
+}
+
+static void free_headers(uw_Mail_headers h) {
+  free_string(h->from);
+  free_string(h->to);
+  free_string(h->cc);
+  free_string(h->bcc);
+  free_string(h->subject);
+  free(h);
+}
+
 uw_Mail_headers uw_Mail_empty = NULL;
 
 static void header(uw_context ctx, uw_Basis_string s) {
@@ -467,6 +500,15 @@ static void commit(void *data) {
   close(sock);
 }
 
+static void free_job(void *p, int will_retry) {
+  job *j = p;
+
+  free_headers(j->h);
+  free_string(j->body);
+  free_string(j->xbody);
+  free(j);
+}
+
 uw_unit uw_Mail_send(uw_context ctx, uw_Mail_headers h, uw_Basis_string body, uw_Basis_string xbody) {
   job *j;
   char *s;
@@ -489,14 +531,14 @@ uw_unit uw_Mail_send(uw_context ctx, uw_Mail_headers h, uw_Basis_string body, uw
         uw_error(ctx, FATAL, "HTML message body contains a line with just a period");
   }
 
-  j = uw_malloc(ctx, sizeof(job));
+  j = malloc(sizeof(job));
 
   j->ctx = ctx;
-  j->h = h;
-  j->body = body;
-  j->xbody = xbody;
+  j->h = copy_headers(h);
+  j->body = copy_string(body);
+  j->xbody = copy_string(xbody);
 
-  uw_register_transactional(ctx, j, commit, NULL, NULL);
+  uw_register_transactional(ctx, j, commit, NULL, free_job);
 
   return uw_unit_v;
 }
