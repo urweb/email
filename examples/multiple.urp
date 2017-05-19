@@ -1,0 +1,9 @@
+library ..
+rewrite url Multiple/*
+allow url main
+safeGet main
+prefix http://localhost:8080/
+
+$/list
+
+multiple
