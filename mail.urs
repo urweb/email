@@ -8,6 +8,7 @@ val empty : headers
 (* Each of the following may be used at most once in constructing a [headers]. *)
 val from : string -> headers -> headers
 val subject : string -> headers -> headers
+val replyto : string -> headers -> headers
 
 (* The following must be called with single valid e-mail address arguments, and
  * all such addresses passed are combined into single header values. *)

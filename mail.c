@@ -10,7 +10,7 @@
 #include <urweb.h>
 
 struct headers {
-  uw_Basis_string from, to, cc, bcc, subject;
+  uw_Basis_string from, to, cc, bcc, subject, replyto;
 };
 
 typedef struct headers *uw_Mail_headers;
@@ -36,6 +36,7 @@ static uw_Mail_headers copy_headers(uw_Mail_headers h) {
   h2->cc = copy_string(h->cc);
   h2->bcc = copy_string(h->bcc);
   h2->subject = copy_string(h->subject);
+  h2->replyto = copy_string(h->replyto);
   return h2;
 }
 
@@ -45,6 +46,7 @@ static void free_headers(uw_Mail_headers h) {
   free_string(h->cc);
   free_string(h->bcc);
   free_string(h->subject);
+  free_string(h->replyto);
   free(h);
 }
 
@@ -172,6 +174,23 @@ uw_Mail_headers uw_Mail_subject(uw_context ctx, uw_Basis_string s, uw_Mail_heade
   return h2;
 }
 
+uw_Mail_headers uw_Mail_replyto(uw_context ctx, uw_Basis_string s, uw_Mail_headers h) {
+  uw_Mail_headers h2 = uw_malloc(ctx, sizeof(struct headers));
+
+  if (h)
+    *h2 = *h;
+  else
+    memset(h2, 0, sizeof(*h2));
+
+  if (h2->replyto)
+    uw_error(ctx, FATAL, "Duplicate Reply-to header");
+
+  address(ctx, s);
+  h2->replyto = uw_strdup(ctx, s);
+
+  return h2;
+}
+
 typedef struct {
   uw_context ctx;
   uw_Mail_headers h;
@@ -187,7 +206,7 @@ static int smtp_read(uw_context ctx, int sock, char *buf, ssize_t *pos) {
     ssize_t recvd;
 
     buf[*pos] = 0;
-  
+
     if ((s = strchr(buf, '\n'))) {
       int n;
 
@@ -386,6 +405,17 @@ static void commit(void *data) {
     if (really_string(sock, out) < 0) {
       close(sock);
       uw_set_error_message(j->ctx, "Error sending Cc");
+      return;
+    }
+  }
+
+  if (j->h->replyto) {
+    snprintf(out, sizeof(out), "Reply-to: %s\r\n", j->h->replyto);
+    out[sizeof(out)-1] = 0;
+
+    if (really_string(sock, out) < 0) {
+      close(sock);
+      uw_set_error_message(j->ctx, "Error sending Reply-to");
       return;
     }
   }
