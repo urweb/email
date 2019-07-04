@@ -1,16 +1,11 @@
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <curl/curl.h>
 
 #include <urweb.h>
 
 struct headers {
-  uw_Basis_string from, to, cc, bcc, subject;
+  uw_Basis_string from, to, cc, bcc, subject, user_agent;
 };
 
 typedef struct headers *uw_Mail_headers;
@@ -36,6 +31,7 @@ static uw_Mail_headers copy_headers(uw_Mail_headers h) {
   h2->cc = copy_string(h->cc);
   h2->bcc = copy_string(h->bcc);
   h2->subject = copy_string(h->subject);
+  h2->user_agent = copy_string(h->user_agent);
   return h2;
 }
 
@@ -45,6 +41,7 @@ static void free_headers(uw_Mail_headers h) {
   free_string(h->cc);
   free_string(h->bcc);
   free_string(h->subject);
+  free_string(h->user_agent);
   free(h);
 }
 
@@ -67,8 +64,6 @@ static void address(uw_context ctx, uw_Basis_string s) {
 }
 
 uw_Mail_headers uw_Mail_from(uw_context ctx, uw_Basis_string s, uw_Mail_headers h) {
-  // char **allowed = uw_get_global(ctx, "mail_from");
-  // Might add this policy checking (or some expanded version of it) back later.
   uw_Mail_headers h2 = uw_malloc(ctx, sizeof(struct headers));
 
   if (h)
@@ -79,20 +74,6 @@ uw_Mail_headers uw_Mail_from(uw_context ctx, uw_Basis_string s, uw_Mail_headers 
   if (h2->from)
     uw_error(ctx, FATAL, "Duplicate From header");
 
-  /*
-  if (!allowed)
-    uw_error(ctx, FATAL, "No From address whitelist has been set.  Perhaps you are not authorized to send e-mail.");
-
-  if (!(allowed[0] && !strcmp(allowed[0], "*"))) {
-    for (; *allowed; ++allowed)
-      if (!strcmp(*allowed, s))
-        goto ok;
-
-    uw_error(ctx, FATAL, "From address is not in whitelist");
-  }
-
- ok:
-  */
   address(ctx, s);
   h2->from = uw_strdup(ctx, s);
 
@@ -113,8 +94,6 @@ uw_Mail_headers uw_Mail_to(uw_context ctx, uw_Basis_string s, uw_Mail_headers h)
     h2->to = all;
   } else
     h2->to = uw_strdup(ctx, s);
-
-  fprintf(stderr, "TO: %s\n", h2->to);
 
   return h2;
 }
@@ -172,233 +151,156 @@ uw_Mail_headers uw_Mail_subject(uw_context ctx, uw_Basis_string s, uw_Mail_heade
   return h2;
 }
 
+uw_Mail_headers uw_Mail_user_agent(uw_context ctx, uw_Basis_string s, uw_Mail_headers h) {
+  uw_Mail_headers h2 = uw_malloc(ctx, sizeof(struct headers));
+
+  if (h)
+    *h2 = *h;
+  else
+    memset(h2, 0, sizeof(*h2));
+
+  if (h2->user_agent)
+    uw_error(ctx, FATAL, "Duplicate User-Agent header");
+
+  header(ctx, s);
+  h2->user_agent = uw_strdup(ctx, s);
+
+  return h2;
+}
+
 typedef struct {
   uw_context ctx;
   uw_Mail_headers h;
-  uw_Basis_string body, xbody;
+  uw_Basis_string server, ca, user, password, body, xbody;
+  uw_Basis_bool ssl;
 } job;
 
-#define BUFLEN (1024*1024)
+typedef struct {
+  const char *content;
+  size_t length;
+} upload_status;
 
-static int smtp_read(uw_context ctx, int sock, char *buf, ssize_t *pos) {
-  char *s;
+static size_t do_upload(void *ptr, size_t size, size_t nmemb, void *userp)
+{
+  upload_status *upload_ctx = (upload_status *)userp;
+  size *= nmemb;
+  if (size > upload_ctx->length)
+    size = upload_ctx->length;
 
-  while (1) {
-    ssize_t recvd;
-
-    buf[*pos] = 0;
-  
-    if ((s = strchr(buf, '\n'))) {
-      int n;
-
-      *s = 0;
-
-      if (sscanf(buf, "%d ", &n) != 1) {
-        close(sock);
-        uw_set_error_message(ctx, "Mail server response does not begin with a code.");
-        return 0;
-      }
-
-      *pos -= s - buf + 1;
-      memmove(buf, s+1, *pos);
-
-      return n;
-    }
-
-    recvd = recv(sock, buf + *pos, BUFLEN - *pos - 1, 0);
-
-    if (recvd == 0) {
-      close(sock);
-      uw_set_error_message(ctx, "Mail server response ends unexpectedly.");
-      return 0;
-    } else if (recvd < 0) {
-      close(sock);
-      uw_set_error_message(ctx, "Error reading mail server response.");
-      return 0;
-    }
-
-    *pos += recvd;
-  }
+  memcpy(ptr, upload_ctx->content, size);
+  upload_ctx->content += size;
+  upload_ctx->length -= size;
+  return size;
 }
 
-static int really_string(int sock, const char *s) {
-  fprintf(stderr, "MAIL: %s\n", s);
-  return uw_really_send(sock, s, strlen(s));
-}
-
-static int sendAddrs(const char *kind, uw_context ctx, int sock, char *s, char *buf, ssize_t *pos) {
-  char *p;
-  char out[BUFLEN];
-
-  if (!s)
-    return 0;
-
-  for (p = strchr(s, ','); p; p = strchr(p+1, ',')) {
-    *p = 0;
-
-    snprintf(out, sizeof(out), "RCPT TO:%s\r\n", s);
-    out[sizeof(out)-1] = 0;
-    *p = ',';
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(ctx, "Error sending RCPT TO for %s", kind);
-      return 1;
-    }
-
-    if (smtp_read(ctx, sock, buf, pos) != 250) {
-      close(sock);
-      uw_set_error_message(ctx, "Mail server doesn't respond to %s RCPT TO with code 250.", kind);
-      return 1;
-    }
-
-    s = p+1;
-  }
-
-  if (*s) {
-    snprintf(out, sizeof(out), "RCPT TO:%s\r\n", s);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(ctx, "Error sending RCPT TO for %s", kind);
-      return 1;
-    }
-
-    if (smtp_read(ctx, sock, buf, pos) != 250) {
-      close(sock);
-      uw_set_error_message(ctx, "Mail server doesn't respond to %s RCPT TO with code 250.", kind);
-      return 1;
-    }
-  }
-
-  return 0;
+// Extract e-mail address from a string that is either *just* an e-mail address or looks like "Recipient <address>".
+// Note: it's destructive!
+// Luckily, we only apply it to strings we are done using for other purposes (copied into buffer with e-mail contents).
+static char *addrOf(char *s) {
+  char *p = strchr(s, '<');
+  if (p) {
+    char *p2 = strchr(p+1, '>');
+    if (p2) {
+      *p2 = 0;
+      return p+1;
+    } else
+      return s;
+  } else
+    return s;
 }
 
 static void commit(void *data) {
   job *j = data;
-  int sock;
-  struct sockaddr_in my_addr;
-  char buf[BUFLEN], out[BUFLEN];
-  ssize_t pos = 0;
-  char *s;
+  char *buf, *cur;
+  size_t buflen = 50;
+  CURL *curl;
+  CURLcode res;
+  upload_status upload_ctx;
+  struct curl_slist *recipients = NULL;
 
-  if ((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-    uw_set_error_message(j->ctx, "Can't create socket for mail server connection");
+  buflen += 8 + strlen(j->h->from);
+  if (j->h->to)
+    buflen += 6 + strlen(j->h->to);
+  if (j->h->cc)
+    buflen += 6 + strlen(j->h->cc);
+  if (j->h->bcc)
+    buflen += 7 + strlen(j->h->bcc);
+  if (j->h->subject)
+    buflen += 11 + strlen(j->h->subject);
+  if (j->h->user_agent)
+    buflen += 14 + strlen(j->h->user_agent);
+  buflen += strlen(j->body);
+  if (j->xbody)
+    buflen += 219 + strlen(j->xbody);
+
+  cur = buf = malloc(buflen);
+  if (!buf) {
+    uw_set_error_message(j->ctx, "Can't allocate buffer for message contents");
     return;
   }
 
-  my_addr.sin_family = AF_INET;
-  my_addr.sin_port = htons(25);
-  my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  memset(my_addr.sin_zero, 0, sizeof my_addr.sin_zero);
-
-  if (connect(sock, (struct sockaddr *)&my_addr, sizeof my_addr) < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error connecting to mail server");
-    return;
-  }
-
-  if (smtp_read(j->ctx, sock, buf, &pos) != 220) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't greet with code 220.");
-    return;
-  }
-
-  if (really_string(sock, "HELO localhost\r\n") < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending HELO");
-    return;
-  }
-
-  if (smtp_read(j->ctx, sock, buf, &pos) != 250) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't respond to HELO with code 250.");
-    return;
-  }
-
-  snprintf(out, sizeof(out), "MAIL FROM:%s\r\n", j->h->from);
-  out[sizeof(out)-1] = 0;
-
-  if (really_string(sock, out) < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending MAIL FROM");
-    return;
-  }
-
-  if (smtp_read(j->ctx, sock, buf, &pos) != 250) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't respond to MAIL FROM with code 250.");
-    return;
-  }
-
-  if (sendAddrs("To", j->ctx, sock, j->h->to, buf, &pos)) return;
-  if (sendAddrs("Cc", j->ctx, sock, j->h->cc, buf, &pos)) return;
-  if (sendAddrs("Bcc", j->ctx, sock, j->h->bcc, buf, &pos)) return;
-
-  if (really_string(sock, "DATA\r\n") < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending DATA");
-    return;
-  }
-
-  if (smtp_read(j->ctx, sock, buf, &pos) != 354) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't respond to DATA with code 354.");
-    return;
-  }
-
-  snprintf(out, sizeof(out), "From: %s\r\n", j->h->from);
-  out[sizeof(out)-1] = 0;
-
-  if (really_string(sock, out) < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending From");
-    return;
+  if (j->h->from) {
+    int written = sprintf(cur, "From: %s\r\n", j->h->from);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing From address");
+      free(buf);
+      return;
+    } else
+      cur += written;
   }
 
   if (j->h->subject) {
-    snprintf(out, sizeof(out), "Subject: %s\r\n", j->h->subject);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending Subject");
+    int written = sprintf(cur, "Subject: %s\r\n", j->h->subject);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing Subject");
+      free(buf);
       return;
-    }
+    } else
+      cur += written;
   }
-
+  
   if (j->h->to) {
-    snprintf(out, sizeof(out), "To: %s\r\n", j->h->to);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending To");
+    int written = sprintf(cur, "To: %s\r\n", j->h->to);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing To addresses");
+      free(buf);
       return;
-    }
+    } else
+      cur += written;
   }
 
   if (j->h->cc) {
-    snprintf(out, sizeof(out), "Cc: %s\r\n", j->h->cc);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending Cc");
+    int written = sprintf(cur, "Cc: %s\r\n", j->h->cc);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing Cc addresses");
+      free(buf);
       return;
-    }
+    } else
+      cur += written;
   }
 
-  if ((s = uw_get_global(j->ctx, "extra_mail_headers"))) {
-    if (really_string(sock, s) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending extra headers");
+  if (j->h->bcc) {
+    int written = sprintf(cur, "Bcc: %s\r\n", j->h->bcc);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing Bcc addresses");
+      free(buf);
       return;
-    }
+    } else
+      cur += written;
+  }
+
+  if (j->h->user_agent) {
+    int written = sprintf(cur, "User-Agent: %s\r\n", j->h->user_agent);
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing User-Agent");
+      free(buf);
+      return;
+    } else
+      cur += written;
   }
 
   if (j->xbody) {
+    int written;
     char separator[11];
     separator[sizeof(separator)-1] = 0;
 
@@ -409,109 +311,118 @@ static void commit(void *data) {
         separator[i] = 'A' + (rand() % 26);
     } while (strstr(j->body, separator) || strstr(j->xbody, separator));
 
-    snprintf(out, sizeof(out), "MIME-Version: 1.0\r\n"
-             "Content-Type: multipart/alternative; boundary=\"%s\"\r\n"
-             "\r\n"
-             "--%s\r\n"
-             "Content-Type: text/plain; charset=utf-8\r\n"
-             "\r\n",
-             separator, separator);
-    out[sizeof(out)-1] = 0;
+    written = sprintf(cur, "MIME-Version: 1.0\r\n"
+                      "Content-Type: multipart/alternative; boundary=\"%s\"\r\n"
+                      "\r\n"
+                      "--%s\r\n"
+                      "Content-Type: text/plain; charset=utf-8\r\n"
+                      "\r\n"
+                      "%s\r\n"
+                      "--%s\r\n"
+                      "Content-Type: text/html; charset=utf-8\r\n"
+                      "\r\n"
+                      "%s\r\n"
+                      "--%s--",
+                      separator, separator, j->body, separator, j->xbody, separator);
 
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending multipart beginning");
-      return;
-    }
-
-    if (really_string(sock, j->body) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending message text body");
-      return;
-    }
-
-    snprintf(out, sizeof(out), "\r\n"
-             "--%s\r\n"
-             "Content-Type: text/html; charset=utf-8\r\n"
-             "\r\n",
-             separator);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending multipart middle");
-      return;
-    }
-
-    if (really_string(sock, j->xbody) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending message HTML body");
-      return;
-    }
-
-    snprintf(out, sizeof(out), "\r\n"
-             "--%s--",
-             separator);
-    out[sizeof(out)-1] = 0;
-
-    if (really_string(sock, out) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending multipart end");
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing bodies, including HTML");
+      free(buf);
       return;
     }
   } else {
-    if (really_string(sock, "Content-Type: text/plain; charset=utf-8\r\n\r\n") < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending text Content-Type");
+    int written = sprintf(cur, "Content-Type: text/plain; charset=utf-8\r\n"
+                          "\r\n"
+                          "%s",
+                          j->body);
+
+    if (written < 0) {
+      uw_set_error_message(j->ctx, "Error writing body");
+      free(buf);
       return;
     }
+  }
 
-    if (really_string(sock, j->body) < 0) {
-      close(sock);
-      uw_set_error_message(j->ctx, "Error sending message body");
-      return;
+  upload_ctx.content = buf;
+  upload_ctx.length = strlen(buf);
+
+  if (j->h->to) {
+    char *saveptr, *addr = strtok_r(j->h->to, ",", &saveptr);
+    do {
+      recipients = curl_slist_append(recipients, addrOf(addr));
+    } while ((addr = strtok_r(NULL, ",", &saveptr)));
+  }
+
+  if (j->h->cc) {
+    char *saveptr, *addr = strtok_r(j->h->cc, ",", &saveptr);
+    do {
+      recipients = curl_slist_append(recipients, addrOf(addr));
+    } while ((addr = strtok_r(NULL, ",", &saveptr)));
+  }
+
+  if (j->h->bcc) {
+    char *saveptr, *addr = strtok_r(j->h->bcc, ",", &saveptr);
+    do {
+      recipients = curl_slist_append(recipients, addrOf(addr));
+    } while ((addr = strtok_r(NULL, ",", &saveptr)));
+  }
+  
+  curl = curl_easy_init();
+  if (!curl) {
+    free(buf);
+    uw_set_error_message(j->ctx, "Can't create curl object");
+    return;
+  }
+
+  curl_easy_setopt(curl, CURLOPT_USERNAME, j->user);
+  curl_easy_setopt(curl, CURLOPT_PASSWORD, j->password);
+  curl_easy_setopt(curl, CURLOPT_URL, j->server);
+
+  if (j->ssl) {
+    curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+    if (j->ca) {
+      curl_easy_setopt(curl, CURLOPT_CAINFO, j->ca);
+    } else {
+      curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+      curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     }
   }
 
-  if (really_string(sock, "\r\n.\r\n") < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending message terminator");
-    return;
-  }
+  curl_easy_setopt(curl, CURLOPT_MAIL_FROM, addrOf(j->h->from));
+  curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, do_upload);
+  curl_easy_setopt(curl, CURLOPT_READDATA, &upload_ctx);
+  curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+  //curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
-  if (smtp_read(j->ctx, sock, buf, &pos) != 250) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't respond to end of message with code 250.");
-    return;
-  }
+  res = curl_easy_perform(curl);
 
-  if (really_string(sock, "QUIT\r\n") < 0) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Error sending QUIT");
-    return;
-  }
+  if (res != CURLE_OK)
+    uw_set_error_message(j->ctx, "Curl error sending e-mail: %s", curl_easy_strerror(res));
 
-  if (smtp_read(j->ctx, sock, buf, &pos) != 221) {
-    close(sock);
-    uw_set_error_message(j->ctx, "Mail server doesn't respond to QUIT with code 221.");
-    return;
-  }
-
-  close(sock);
+  curl_slist_free_all(recipients);
+  curl_easy_cleanup(curl);
+  free(buf);
 }
 
 static void free_job(void *p, int will_retry) {
   job *j = p;
 
   free_headers(j->h);
+  free_string(j->server);
+  free_string(j->ca);
+  free_string(j->user);
+  free_string(j->password);
   free_string(j->body);
   free_string(j->xbody);
   free(j);
 }
 
-uw_unit uw_Mail_send(uw_context ctx, uw_Mail_headers h, uw_Basis_string body, uw_Basis_string xbody) {
+uw_unit uw_Mail_send(uw_context ctx, uw_Basis_string server,
+                     uw_Basis_bool ssl, uw_Basis_string ca,
+                     uw_Basis_string user, uw_Basis_string password,
+                     uw_Mail_headers h, uw_Basis_string body, uw_Basis_string xbody) {
   job *j;
-  char *s;
 
   if (!h || !h->from)
     uw_error(ctx, FATAL, "No From address set for e-mail message");
@@ -519,22 +430,15 @@ uw_unit uw_Mail_send(uw_context ctx, uw_Mail_headers h, uw_Basis_string body, uw
   if (!h->to && !h->cc && !h->bcc)
     uw_error(ctx, FATAL, "No recipients specified for e-mail message");
 
-  for (s = strchr(body, '.'); s; s = strchr(s+1, '.'))
-    if ((s[1] == '\n' || s[1] == '\r')
-        && (s <= body || s[-1] == '\n' || s[-1] == '\r'))
-      uw_error(ctx, FATAL, "Message body contains a line with just a period");
-
-  if (xbody) {
-    for (s = strchr(xbody, '.'); s; s = strchr(s+1, '.'))
-      if ((s[1] == '\n' || s[1] == '\r')
-          && (s <= xbody || s[-1] == '\n' || s[-1] == '\r'))
-        uw_error(ctx, FATAL, "HTML message body contains a line with just a period");
-  }
-
   j = malloc(sizeof(job));
 
   j->ctx = ctx;
   j->h = copy_headers(h);
+  j->server = copy_string(server);
+  j->ssl = ssl;
+  j->ca = copy_string(ca);
+  j->user = copy_string(user);
+  j->password = copy_string(password);
   j->body = copy_string(body);
   j->xbody = copy_string(xbody);
 

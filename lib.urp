@@ -1,4 +1,4 @@
 ffi mail
 include mail.h
-link -lurweb_mail
+link -lurweb_mail -lcurl
 effectful Mail.send

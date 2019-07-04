@@ -8,6 +8,8 @@ AC_PROG_CC()
 AC_PROG_LIBTOOL()
 AC_CONFIG_MACRO_DIR([m4])
 
+LIBCURL_CHECK_CONFIG(yes, [], [echo >/dev/null], [echo "You must install libcurl development files."; exit 1])
+
 if test [$prefix = "NONE"]; then
     prefix=/usr/local
 fi

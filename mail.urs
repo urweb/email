@@ -15,8 +15,14 @@ val to : string -> headers -> headers
 val cc : string -> headers -> headers
 val bcc : string -> headers -> headers
 
-(* Send out a message by connecting to an SMTP server on localhost:25. *)
-val send : headers
-           -> string       (* Plain text message body *)
-           -> option xbody (* Optional HTML message body *)
+(* Send out a message by connecting a specifieid SMTP server. *)
+val send : string           (* Server, in CURL URL form *)
+           -> bool          (* Require SSL on SMTP connection? *)
+           -> option string (* Certificate authority?
+                             * If not set, allow self-signed certs. *)
+           -> string        (* Username (for SMTP authentication) *)
+           -> string        (* Password (for SMTP authentication) *)
+           -> headers
+           -> string        (* Plain text message body *)
+           -> option xbody  (* Optional HTML message body *)
            -> transaction unit

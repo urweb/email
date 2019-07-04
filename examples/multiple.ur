@@ -1,3 +1,7 @@
+val server = "smtp://you.com:465"
+val user = "you"
+val password = "pass"
+val send = Mail.send server True None user password
 
 fun solicitText (user : string) : transaction string
   = key <- rand;
@@ -28,7 +32,7 @@ fun solicitText (user : string) : transaction string
             )
 
 val sendOneMail (from : string) (to : string) (subject : string) (text : string) : transaction unit
-  = Mail.send (Mail.subject subject (Mail.to to (Mail.from from Mail.empty))) text None
+  = send (Mail.subject subject (Mail.to to (Mail.from from Mail.empty))) text None
               
 val sendMails : transaction unit
   = users <- return ("urweb.test1@mailinator.com" :: "urweb.test2@mailinator.com" :: "urweb.test3@mailinator.com" :: []);
