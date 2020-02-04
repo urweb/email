@@ -279,16 +279,6 @@ static void commit(void *data) {
       cur += written;
   }
 
-  if (j->h->bcc) {
-    int written = sprintf(cur, "Bcc: %s\r\n", j->h->bcc);
-    if (written < 0) {
-      uw_set_error_message(j->ctx, "Error writing Bcc addresses");
-      free(buf);
-      return;
-    } else
-      cur += written;
-  }
-
   if (j->h->user_agent) {
     int written = sprintf(cur, "User-Agent: %s\r\n", j->h->user_agent);
     if (written < 0) {
