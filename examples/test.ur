@@ -1,15 +1,15 @@
 val server = "smtp://you.com:465"
 val user = "you"
 val password = "pass"
-val send = Mail.send server True None user password
+val send = Email.send server True None user password
                
 fun sendPlain r =
-    send (Mail.from r.From (Mail.to r.To (Mail.subject r.Subject Mail.empty)))
+    send (Email.from r.From (Email.to r.To (Email.subject r.Subject Email.empty)))
          r.Body None;
     return <xml>Sent</xml>
 
 fun sendHtml r =
-    send (Mail.from r.From (Mail.to r.To (Mail.subject r.Subject Mail.empty)))
+    send (Email.from r.From (Email.to r.To (Email.subject r.Subject Email.empty)))
          r.Body (Some <xml><a href={url (main ())}>Spread the love!</a></xml>);
     return <xml>Sent</xml>
 

@@ -1,2 +1,2 @@
-val sendMails : transaction unit
+val sendEmails : transaction unit
 val main : unit -> transaction page
