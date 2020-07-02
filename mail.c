@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <curl/curl.h>
 
-#include <urweb.h>
+#include <urweb/urweb.h>
 
 struct headers {
   uw_Basis_string from, to, cc, bcc, subject, user_agent;
