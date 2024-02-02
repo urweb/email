@@ -17,6 +17,31 @@ static uw_Basis_string copy_string(uw_Basis_string s) {
     return strdup(s);
 }
 
+// Some values are expected to be long enough that they might exceed SMTP's limit on line length.
+// Let's at least make sure that the line breaks are clear to SMTP,
+// by changing bare '\n' into "\r\n".
+static uw_Basis_string copy_long_string(uw_context ctx, uw_Basis_string s) {
+  uw_Basis_string copy, in, out;
+  int last_was_cr = 0;
+  
+  if (s == NULL)
+    return NULL;
+
+  copy = uw_malloc(ctx, 2 * strlen(s) + 1);
+  out = copy;
+  for (in = s; *in; ++in) {
+    if (*in == '\n' && !last_was_cr) {
+      *out++ = '\r';
+      *out++ = '\n';
+    } else
+      *out++ = *in;
+    last_was_cr = (*in == '\r');
+  }
+  *out = 0;
+
+  return strdup(copy);
+}
+
 static void free_string(uw_Basis_string s) {
   if (s == NULL)
     return;
@@ -429,8 +454,8 @@ uw_unit uw_Email_send(uw_context ctx, uw_Basis_string server,
   j->ca = copy_string(ca);
   j->user = copy_string(user);
   j->password = copy_string(password);
-  j->body = copy_string(body);
-  j->xbody = copy_string(xbody);
+  j->body = copy_long_string(ctx, body);
+  j->xbody = copy_long_string(ctx, xbody);
 
   uw_register_transactional(ctx, j, commit, NULL, free_job);
 
